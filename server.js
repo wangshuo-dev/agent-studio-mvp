@@ -254,6 +254,93 @@ async function planWithManager(prompt, team, store) {
   return parsePlannerOutput(text, validAgentIds);
 }
 
+function fallbackOrchestrationPlan(prompt, team, store) {
+  const members = getTeamMembers(team, store);
+  return {
+    goal: prompt,
+    planner: 'fallback',
+    tasks: members.map((agent, idx) => ({
+      id: `T${idx + 1}`,
+      owner_agent_id: agent.id,
+      owner_agent_name: agent.name,
+      task: `${agent.name} 从其专业角度处理：${prompt}`,
+      definition_of_done: ['给出明确回答', '说明关键依据/步骤', '说明风险或未完成项（如有）'],
+    })),
+  };
+}
+
+async function planOrchestrationWithManager(prompt, team, store) {
+  const manager = store.agents.find((a) => a.id === team.managerAgentId) || null;
+  const managerModel = manager ? store.models.find((m) => m.id === manager.modelId) : null;
+  const fallback = fallbackOrchestrationPlan(prompt, team, store);
+  if (!manager || !managerModel) return fallback;
+  const members = getTeamMembers(team, store);
+  const memberLines = members.map((m) => `${m.id}|${m.name}|${(m.specialties || []).join(',') || 'none'}`).join('\n');
+  const planPrompt = [
+    `System: ${manager.systemPrompt || ''}`,
+    '你是开发经理，负责拆分任务并分配给团队成员。',
+    '严格输出 JSON（不要 markdown）：',
+    '{"goal":"...","tasks":[{"id":"T1","owner_agent_id":"agent-code","task":"...","definition_of_done":["..."]}]}',
+    `成员列表（id|name|specialties）:\n${memberLines}`,
+    `用户目标：${prompt}`,
+  ].join('\n\n');
+  const out = await runCliModel(managerModel, planPrompt, 30000);
+  const text = `${out.stdout || ''}\n${out.stderr || ''}`;
+  const match = text.match(/\{[\s\S]*\}/);
+  if (!match) return { ...fallback, plannerRaw: text.slice(0, 1000) };
+  try {
+    const parsed = JSON.parse(match[0]);
+    const valid = new Set(members.map((m) => m.id));
+    const tasks = (Array.isArray(parsed.tasks) ? parsed.tasks : [])
+      .filter((t) => valid.has(t.owner_agent_id))
+      .map((t, i) => ({
+        id: t.id || `T${i + 1}`,
+        owner_agent_id: t.owner_agent_id,
+        owner_agent_name: members.find((m) => m.id === t.owner_agent_id)?.name || t.owner_agent_id,
+        task: String(t.task || '').trim() || fallback.tasks[i % Math.max(fallback.tasks.length, 1)]?.task || prompt,
+        definition_of_done: Array.isArray(t.definition_of_done) && t.definition_of_done.length ? t.definition_of_done.map(String) : ['给出明确回答'],
+      }));
+    return { goal: String(parsed.goal || prompt), planner: 'manager', plannerRaw: text.slice(0, 1000), tasks: tasks.length ? tasks : fallback.tasks };
+  } catch {
+    return { ...fallback, plannerRaw: text.slice(0, 1000) };
+  }
+}
+
+function parseWorkResult(text, task) {
+  const match = String(text || '').match(/\{[\s\S]*\}/);
+  if (match) {
+    try {
+      const p = JSON.parse(match[0]);
+      return {
+        task_id: p.task_id || task.id,
+        status: ['done', 'partial', 'blocked', 'failed'].includes(p.status) ? p.status : 'partial',
+        deliverables: Array.isArray(p.deliverables) ? p.deliverables.map(String) : [],
+        evidence: Array.isArray(p.evidence) ? p.evidence.map(String) : [],
+        risks: Array.isArray(p.risks) ? p.risks.map(String) : [],
+        raw: text,
+      };
+    } catch {}
+  }
+  return {
+    task_id: task.id,
+    status: String(text || '').trim() ? 'partial' : 'failed',
+    deliverables: [String(text || '').trim() || '(empty)'],
+    evidence: [],
+    risks: [],
+    raw: text,
+  };
+}
+
+function reviewWork(task, work) {
+  const scoreMap = { done: 1, partial: 0.6, blocked: 0.2, failed: 0 };
+  const score = scoreMap[work.status] ?? 0.5;
+  const issues = [];
+  if (!work.deliverables?.length) issues.push('缺少交付物');
+  if (!work.evidence?.length) issues.push('缺少证据');
+  if (work.status !== 'done') issues.push(`状态为${work.status}`);
+  return { task_id: task.id, status: work.status, score, issues };
+}
+
 async function executeTeamRun({ team, prompt, store, onProgress, jobId }) {
   const emit = (patch) => onProgress && onProgress(patch);
   const isCancelled = () => Boolean(jobId && jobs.get(jobId)?.cancelRequested);
@@ -274,6 +361,99 @@ async function executeTeamRun({ team, prompt, store, onProgress, jobId }) {
     throwIfCancelled();
     strategy = plannerDecision.mode;
     emit({ plannerDecision });
+  }
+
+  if (strategy === 'manager-orchestrate') {
+    route = {
+      manager: store.agents.find((a) => a.id === team.managerAgentId) || null,
+      selected: null,
+      matchedKeyword: null,
+      mode: 'manager-orchestrate',
+    };
+    emit({ phase: 'orchestrate-planning', currentAgent: route.manager?.name || '开发经理', progress: { current: 0, total: 4 } });
+    const plan = await planOrchestrationWithManager(prompt, team, store);
+    throwIfCancelled();
+    emit({ orchestration: { plan }, phase: 'orchestrate-dispatch', progress: { current: 1, total: 4 } });
+
+    const taskRuns = await Promise.all((plan.tasks || []).map(async (task) => {
+      const agent = store.agents.find((a) => a.id === task.owner_agent_id);
+      const model = agent ? store.models.find((m) => m.id === agent.modelId) : null;
+      if (!agent || !model) {
+        const work = { task_id: task.id, status: 'blocked', deliverables: [], evidence: [], risks: ['agent/model not found'], raw: '' };
+        return { task, agentName: task.owner_agent_name || task.owner_agent_id, modelId: null, run: { ok: false, code: null, stdout: '', stderr: 'agent/model not found' }, work };
+      }
+      emit({ phase: 'orchestrate-executing', currentAgent: agent.name, progress: { current: 2, total: 4 } });
+      const taskPrompt = [
+        `System: ${agent.systemPrompt || ''}`,
+        `Task ID: ${task.id}`,
+        `Task: ${task.task}`,
+        `Definition of Done:\n- ${(task.definition_of_done || []).join('\n- ')}`,
+        '严格输出 JSON（不要 markdown）：',
+        '{"task_id":"...","status":"done|partial|blocked|failed","deliverables":["..."],"evidence":["..."],"risks":["..."]}',
+      ].join('\n\n');
+      const run = await runCliModel(model, taskPrompt, 45000, { jobId });
+      const work = parseWorkResult(run.stdout || run.stderr || '', task);
+      return { task, agentName: agent.name, modelId: model.id, run, work };
+    }));
+    throwIfCancelled();
+
+    const taskReviews = taskRuns.map((x) => reviewWork(x.task, x.work));
+    const doneCount = taskReviews.filter((r) => r.status === 'done').length;
+    const completion_rate = taskReviews.length ? Number((doneCount / taskReviews.length).toFixed(2)) : 0;
+    const reviewSummary = {
+      overall_status: completion_rate === 1 ? 'done' : (completion_rate > 0 ? 'partial' : 'failed'),
+      completion_rate,
+      task_reviews: taskReviews,
+      next_actions: taskReviews
+        .filter((r) => r.status !== 'done')
+        .map((r) => {
+          const tr = taskRuns.find((x) => x.task.id === r.task_id);
+          return { task_id: r.task_id, owner_agent_id: tr?.task.owner_agent_id, rework: (r.issues || []).join('；') || '补充交付和证据' };
+        }),
+    };
+
+    emit({ phase: 'orchestrate-review', currentAgent: route.manager?.name || '开发经理', progress: { current: 3, total: 4 }, orchestration: { plan, reviewSummary } });
+
+    subRuns = taskRuns.map((x) => ({
+      agentId: x.task.owner_agent_id,
+      agentName: x.agentName,
+      modelId: x.modelId,
+      ...(x.run || {}),
+      task: x.task,
+      structuredWork: x.work,
+    }));
+    result = {
+      ok: reviewSummary.overall_status !== 'failed',
+      code: 0,
+      stdout: [
+        `整体状态：${reviewSummary.overall_status}`,
+        `完成率：${Math.round(reviewSummary.completion_rate * 100)}%`,
+        ...taskRuns.map((x) => `${x.agentName}（${x.task.id}）：${x.work.status}`),
+        ...(reviewSummary.next_actions.length ? ['返工建议：', ...reviewSummary.next_actions.map((n) => `${n.task_id} -> ${n.owner_agent_id}：${n.rework}`)] : ['全部任务已完成。']),
+      ].join('\n'),
+      stderr: '',
+    };
+    emit({ phase: 'orchestrate-complete', progress: { current: 4, total: 4 }, orchestration: { plan, reviewSummary } });
+
+    const finishedAt = new Date().toISOString();
+    return {
+      startedAt,
+      finishedAt,
+      route: {
+        managerAgentId: route.manager?.id || null,
+        selectedAgentId: null,
+        selectedAgentName: null,
+        matchedKeyword: null,
+        mode: route.mode,
+        modelId: null,
+        command: null,
+        argsTemplate: null,
+        plannerDecision: null,
+      },
+      orchestration: { plan, reviewSummary },
+      subRuns,
+      result,
+    };
   }
 
   if (strategy === 'broadcast') {

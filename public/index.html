@@ -7,72 +7,88 @@
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
-    <div class="app-shell">
-      <aside class="left-panel">
-        <div class="panel-header">
-          <h1>Agent Studio</h1>
-          <p>Models / Agents / Teams</p>
+    <div class="stage-shell">
+      <header class="stage-header">
+        <div>
+          <h1>Agent Studio Office</h1>
+          <p>你可以把工作外包给agent团队，扮演甲方角色。</p>
         </div>
-        <div class="tabs">
-          <button class="tab active" data-tab="models">Models</button>
-          <button class="tab" data-tab="agents">Agents</button>
-          <button class="tab" data-tab="teams">Teams</button>
-        </div>
-        <div id="configList" class="config-list"></div>
-        <button id="addItemBtn" class="add-btn">+ Add</button>
-      </aside>
+        <button id="openSettingsBtn" class="ghost-btn">设置</button>
+      </header>
 
-      <main class="center-panel">
+      <main class="stage-main">
+        <section class="office-main-card">
+          <div id="workflowFlow" class="workflow-flow"></div>
+        </section>
+
+        <section class="conversation-card">
+          <div class="chat-controls roleplay-controls">
+            <label>我扮演
+              <select id="roleplayAgentSelect"></select>
+            </label>
+            <label>Team
+              <select id="teamSelect"></select>
+            </label>
+          </div>
+          <textarea id="promptInput" placeholder="以你扮演的员工身份发言，例如：我建议先由调研分析确认需求范围。"></textarea>
+          <div class="chat-actions">
+            <div class="progress-wrap">
+              <div id="progressMeta" class="progress-meta">Idle</div>
+              <div class="progress-bar"><div id="progressFill" class="progress-fill"></div></div>
+            </div>
+            <div class="run-buttons">
+              <button id="cancelRunBtn" class="ghost-btn" disabled>Cancel</button>
+              <button id="runBtn" class="primary-btn">发送并协作</button>
+            </div>
+          </div>
+          <div id="runOutput" class="run-output"></div>
+        </section>
+      </main>
+    </div>
+
+    <div id="settingsDrawer" class="settings-drawer hidden">
+      <div class="settings-backdrop" id="settingsBackdrop"></div>
+      <div class="settings-panel">
         <div class="workspace-header">
           <div>
             <h2 id="editorTitle">Model Editor</h2>
             <p id="editorSubtitle">Edit selected configuration item.</p>
           </div>
           <div class="workspace-actions">
+            <button id="testModelBtn" class="ghost-btn">Test Model</button>
             <button id="saveConfigBtn" class="ghost-btn">Save Config</button>
+            <button id="closeSettingsBtn" class="ghost-btn">关闭</button>
           </div>
         </div>
+        <div class="settings-grid">
+          <aside class="left-panel">
+            <div class="panel-header">
+              <h1>Agent Studio</h1>
+              <p>Models / Agents / Teams</p>
+            </div>
+            <div class="tabs">
+              <button class="tab active" data-tab="models">Models</button>
+              <button class="tab" data-tab="agents">Agents</button>
+              <button class="tab" data-tab="teams">Teams</button>
+            </div>
+            <div id="configList" class="config-list"></div>
+            <button id="addItemBtn" class="add-btn">+ Add</button>
+          </aside>
 
-        <div class="editor-chat-grid">
           <section class="editor-card">
             <div class="card-title">Configuration</div>
-            <div class="editor-actions">
-              <button id="testModelBtn" class="ghost-btn">Test Model</button>
-            </div>
             <div id="editorForm" class="editor-form"></div>
           </section>
 
-          <section class="chat-card">
-            <div class="card-title">Run Team</div>
-            <div class="chat-controls">
-              <label>
-                Team
-                <select id="teamSelect"></select>
-              </label>
+          <aside class="right-panel">
+            <div class="panel-header right">
+              <h2>Trace</h2>
+              <p>Routing + CLI execution logs</p>
             </div>
-            <textarea id="promptInput" placeholder="Describe a task. The manager agent will route it."></textarea>
-            <div class="chat-actions">
-              <div class="progress-wrap">
-                <div id="progressMeta" class="progress-meta">Idle</div>
-                <div class="progress-bar"><div id="progressFill" class="progress-fill"></div></div>
-              </div>
-              <div class="run-buttons">
-                <button id="cancelRunBtn" class="ghost-btn" disabled>Cancel</button>
-                <button id="runBtn" class="primary-btn">Run</button>
-              </div>
-            </div>
-            <div id="runOutput" class="run-output"></div>
-          </section>
+            <div id="traceList" class="trace-list"></div>
+          </aside>
         </div>
-      </main>
-
-      <aside class="right-panel">
-        <div class="panel-header right">
-          <h2>Trace</h2>
-          <p>Routing + CLI execution logs</p>
-        </div>
-        <div id="traceList" class="trace-list"></div>
-      </aside>
+      </div>
     </div>
 
     <script src="/app.js"></script>
