@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Agent Studio MVP</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="left-panel">
+        <div class="panel-header">
+          <h1>Agent Studio</h1>
+          <p>Models / Agents / Teams</p>
+        </div>
+        <div class="tabs">
+          <button class="tab active" data-tab="models">Models</button>
+          <button class="tab" data-tab="agents">Agents</button>
+          <button class="tab" data-tab="teams">Teams</button>
+        </div>
+        <div id="configList" class="config-list"></div>
+        <button id="addItemBtn" class="add-btn">+ Add</button>
+      </aside>
+
+      <main class="center-panel">
+        <div class="workspace-header">
+          <div>
+            <h2 id="editorTitle">Model Editor</h2>
+            <p id="editorSubtitle">Edit selected configuration item.</p>
+          </div>
+          <div class="workspace-actions">
+            <button id="saveConfigBtn" class="ghost-btn">Save Config</button>
+          </div>
+        </div>
+
+        <div class="editor-chat-grid">
+          <section class="editor-card">
+            <div class="card-title">Configuration</div>
+            <div class="editor-actions">
+              <button id="testModelBtn" class="ghost-btn">Test Model</button>
+            </div>
+            <div id="editorForm" class="editor-form"></div>
+          </section>
+
+          <section class="chat-card">
+            <div class="card-title">Run Team</div>
+            <div class="chat-controls">
+              <label>
+                Team
+                <select id="teamSelect"></select>
+              </label>
+            </div>
+            <textarea id="promptInput" placeholder="Describe a task. The manager agent will route it."></textarea>
+            <div class="chat-actions">
+              <div class="progress-wrap">
+                <div id="progressMeta" class="progress-meta">Idle</div>
+                <div class="progress-bar"><div id="progressFill" class="progress-fill"></div></div>
+              </div>
+              <div class="run-buttons">
+                <button id="cancelRunBtn" class="ghost-btn" disabled>Cancel</button>
+                <button id="runBtn" class="primary-btn">Run</button>
+              </div>
+            </div>
+            <div id="runOutput" class="run-output"></div>
+          </section>
+        </div>
+      </main>
+
+      <aside class="right-panel">
+        <div class="panel-header right">
+          <h2>Trace</h2>
+          <p>Routing + CLI execution logs</p>
+        </div>
+        <div id="traceList" class="trace-list"></div>
+      </aside>
+    </div>
+
+    <script src="/app.js"></script>
+  </body>
+</html>
