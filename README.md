@@ -4,6 +4,8 @@
 
 一个本地可运行的多 Agent 网页控制台（AutoGen Studio 风格 MVP）。
 
+![Agent Studio UI](docs/agent-studio-ui.png)
+
 支持：
 - 模型配置（本地 CLI：`claude` / `codex` / `gemini`）
 - Agent 配置（角色、system prompt、specialties）
